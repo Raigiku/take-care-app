@@ -1,19 +1,24 @@
 package com.example.takecare.ui.control
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
-import androidx.appcompat.app.AlertDialog
+import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.Observer
-import androidx.lifecycle.ViewModelProviders
 import com.example.takecare.R
 import com.example.takecare.data.repository.DiagnosticRepository
+import com.example.takecare.data.service.HeartBeatWebSocketListener
 import com.example.takecare.model.Diagnostic
 import kotlinx.android.synthetic.main.fragment_control.view.*
-import org.w3c.dom.Text
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.WebSocket
+import java.util.*
 
 class ControlFragment : Fragment() {
 
@@ -41,33 +46,42 @@ class ControlFragment : Fragment() {
         controlLevel = root.control_card_level
 
         root.control_btn_med.setOnClickListener {
-            val dialogView = layoutInflater.inflate(R.layout.control_dialog, container, false)
-            val builder = AlertDialog.Builder(this.requireContext())
+            val webSocket = startWebSocketConnection()
+            root.control_btn_med.isVisible = false
+            root.control_progressBar.isVisible = true
 
-            builder.setView(dialogView)
-            val dialog = builder.create()
-
-            val heartRate: EditText = dialogView.findViewById(R.id.dialog_input_control)
-            val btnAccept: Button = dialogView.findViewById(R.id.dialog_btn_accept)
-
-            btnAccept.setOnClickListener {
-                if(heartRate.text.isNullOrBlank()){
-                    Toast.makeText(this.requireContext(), "El valor de frecuencia cardiaca no puede ser vacío", Toast.LENGTH_SHORT ).show()
-                    dialog.dismiss()
-                }else if (heartRate.text.toString().toInt() < 65 ){
-                    Toast.makeText(this.requireContext(), "El valor de frecuencia cardiaca no puede ser menor a 65", Toast.LENGTH_SHORT ).show()
-                    dialog.dismiss()
-                }else if (heartRate.text.toString().toInt() > 230 ){
-                    Toast.makeText(this.requireContext(), "Introducir un valor válido.", Toast.LENGTH_LONG ).show()
-                    dialog.dismiss()
-                }else{
-                    viewModel.addDiagnostics(heartRate.text.toString().toInt())
-                    dialog.dismiss()
-                }
-            }
-            dialog.show()
+            Handler(Looper.getMainLooper()).postDelayed({
+                root.control_btn_med.isVisible = true
+                root.control_progressBar.isVisible = false
+                val closing = 1000
+                webSocket.close(closing, null)
+            }, 5000)
         }
         return root
+    }
+
+    private fun startWebSocketConnection(): WebSocket {
+        val request = Request.Builder().url("wss://takecare-websocket.herokuapp.com/").build()
+        val listener = HeartBeatWebSocketListener(::updateUiFromWebSocketData)
+        val client = OkHttpClient()
+        val webSocket = client.newWebSocket(request, listener)
+        client.dispatcher.executorService.shutdown()
+        return webSocket
+    }
+
+    private fun updateUiFromWebSocketData(text: String) {
+        controlContent.text = "$text\nLPM"
+        val rightNow = Calendar.getInstance()
+        val currentHour = rightNow[Calendar.HOUR_OF_DAY]
+        val currentMinute = rightNow[Calendar.MINUTE]
+        val currentSecond = rightNow[Calendar.SECOND]
+        val minutePaddingZero = if (currentMinute < 10) "0" else ""
+        val secondPaddingZero = if (currentSecond < 10) "0" else ""
+        val time = "Hora: $currentHour:$minutePaddingZero$currentMinute:$secondPaddingZero$currentSecond"
+        controlDate.text = time
+        val heartbeat = text.toInt()
+        controlLevel.text =
+            if (heartbeat <= 80) "Sin Ansiedad" else if (heartbeat <= 100) "Bajo" else if (heartbeat <= 120) "Medio" else "Alto"
     }
 
     private fun setupViewModel() {
